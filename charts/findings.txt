@@ -1,0 +1,9 @@
+Sample: 8,000 users per arm
+Control conversion : 11.31%
+Treatment conversion: 12.47%
+Absolute lift: +1.16pp | Relative lift: +10.3%
+Two-proportion z-test: z=2.27, p=0.0231
+95% CI on difference: [+0.16pp, +2.17pp]
+Revenue/user: control $6.32 vs treatment $7.38 (Welch p=0.0013)
+MDE at 80% power (n=8000/arm): 1.41pp
+Decision: SHIP - significant positive lift
