@@ -114,20 +114,34 @@ sig = "statistically significant" if p_value < 0.05 else "not significant"
 ax.set_title(f"Checkout A/B Test - {rel_lift*100:+.1f}% lift (p={p_value:.3f}, {sig})")
 fig.tight_layout(); fig.savefig("charts/01_conversion_comparison.png"); plt.close()
 
-# ---------- Chart 2: bootstrap distribution of the difference ----------
-boot = []
-for _ in range(5000):
-    bc = rng.choice(conv_c, n_per_arm).mean()
-    bt = rng.choice(conv_t, n_per_arm).mean()
-    boot.append((bt-bc)*100)
-boot = np.array(boot)
+# ---------- Chart 2: permutation test of the null ----------
+# The previous version of this chart resampled each arm separately, which gives the
+# sampling distribution of the OBSERVED difference. That distribution is centred on
+# the estimate, not on zero, so drawing a line at zero and calling it "no effect"
+# compared the estimate to the wrong thing.
+#
+# A permutation test builds the real null: if the checkout had no effect, the group
+# label is arbitrary, so shuffling labels and recomputing the difference shows what
+# chance alone produces. The observed difference is then read against that.
+pooled = np.concatenate([conv_c, conv_t])
+n_perm = 10_000
+perm_diffs = np.empty(n_perm)
+for i in range(n_perm):
+    shuffled = rng.permutation(pooled)
+    perm_diffs[i] = (shuffled[n_per_arm:].mean() - shuffled[:n_per_arm].mean()) * 100
+perm_p = float((np.abs(perm_diffs) >= abs(abs_lift * 100)).mean())
+
 fig, ax = plt.subplots(figsize=(7.5, 4.2))
-ax.hist(boot, bins=40, color=BLUE, alpha=0.85)
-ax.axvline(0, color="#c53030", ls="--", label="No effect")
+ax.hist(perm_diffs, bins=50, color=BLUE, alpha=0.85)
+ax.axvline(0, color="#999", lw=1)
 ax.axvline(abs_lift*100, color=GREEN, lw=2, label=f"Observed {abs_lift*100:+.2f}pp")
-ax.set_title("Bootstrap distribution of conversion-rate difference (5,000 resamples)")
-ax.set_xlabel("Treatment - Control conversion (pp)"); ax.legend()
-fig.tight_layout(); fig.savefig("charts/02_bootstrap_difference.png"); plt.close()
+ax.set_title(f"Permutation null: 10,000 label shuffles (permutation p = {perm_p:.4f})")
+ax.set_xlabel("Treatment - Control conversion under the null (pp)"); ax.legend()
+fig.tight_layout(); fig.savefig("charts/02_permutation_null.png"); plt.close()
+import os
+if os.path.exists("charts/02_bootstrap_difference.png"):
+    os.remove("charts/02_bootstrap_difference.png")
+print(f"Permutation test: p = {perm_p:.4f} (z-test gave {p_value:.4f})")
 
 with open("charts/findings.txt", "w") as f:
     f.write(f"Sample: {n_per_arm:,} users per arm\n")
@@ -136,8 +150,15 @@ with open("charts/findings.txt", "w") as f:
     f.write(f"Absolute lift: {abs_lift*100:+.2f}pp | Relative lift: {rel_lift*100:+.1f}%\n")
     f.write(f"Two-proportion z-test: z={z:.2f}, p={p_value:.4f}\n")
     f.write(f"95% CI on difference: [{ci[0]*100:+.2f}pp, {ci[1]*100:+.2f}pp]\n")
-    f.write(f"Revenue/user: control ${rpu_c:.2f} vs treatment ${rpu_t:.2f} (Welch p={t_p:.4f})\n")
-    f.write(f"MDE at 80% power (n={n_per_arm}/arm): {mde*100:.2f}pp\n")
+    f.write(f"Permutation test (10,000 shuffles): p={perm_p:.4f}\n")
+    f.write("\nGUARDRAIL (not the ship decision):\n")
+    f.write(f"Revenue/user: control ${rpu_c:.2f} vs treatment ${rpu_t:.2f}\n")
+    f.write(f"  bootstrap 95% CI on the difference: [${rpu_ci[0]:+.2f}, ${rpu_ci[1]:+.2f}]\n")
+    f.write(f"  Welch t-test p={t_p:.4f} (shown for comparison; revenue is zero-inflated)\n")
+    f.write(f"\nDesign: {TARGET_MDE*100:.1f}pp MDE at {POWER:.0%} power needed "
+            f"{n_required:,}/arm; ran {n_per_arm:,}/arm\n")
+    f.write(f"Achieved MDE at n={n_per_arm}/arm: {mde*100:.2f}pp\n")
+    f.write(f"SRM check: {n_c:,} vs {n_t:,}, chi2 p={srm_p:.3f}\n")
     f.write(f"Decision: {'SHIP - significant positive lift' if p_value<0.05 and abs_lift>0 else 'DO NOT SHIP'}\n")
 
 print("Done. Charts + findings in charts/")

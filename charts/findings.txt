@@ -4,6 +4,14 @@ Treatment conversion: 12.47%
 Absolute lift: +1.16pp | Relative lift: +10.3%
 Two-proportion z-test: z=2.27, p=0.0231
 95% CI on difference: [+0.16pp, +2.17pp]
-Revenue/user: control $6.32 vs treatment $7.38 (Welch p=0.0013)
-MDE at 80% power (n=8000/arm): 1.41pp
+Permutation test (10,000 shuffles): p=0.0237
+
+GUARDRAIL (not the ship decision):
+Revenue/user: control $6.32 vs treatment $7.38
+  bootstrap 95% CI on the difference: [$+0.41, $+1.72]
+  Welch t-test p=0.0013 (shown for comparison; revenue is zero-inflated)
+
+Design: 1.5pp MDE at 80% power needed 7,047/arm; ran 8,000/arm
+Achieved MDE at n=8000/arm: 1.41pp
+SRM check: 8,000 vs 8,000, chi2 p=1.000
 Decision: SHIP - significant positive lift
