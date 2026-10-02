@@ -22,9 +22,19 @@ BLUE, GREEN = "#2b6cb0", "#2f855a"
 rng = np.random.default_rng(21)
 
 # ---------- Design ----------
-n_per_arm = 8_000
+# Sample size is a decision made BEFORE the experiment runs, not a number you
+# report afterwards. Pick the smallest lift worth detecting, then solve for n.
 p_control = 0.114          # true baseline conversion
-p_treat = 0.129           # true treatment conversion (+1.5pp)
+p_treat = 0.129            # true treatment conversion (+1.5pp)
+
+ALPHA, POWER = 0.05, 0.80
+TARGET_MDE = 0.015         # smallest absolute lift the business cares about (1.5pp)
+_za = stats.norm.ppf(1 - ALPHA / 2)
+_zb = stats.norm.ppf(POWER)
+n_required = int(np.ceil(2 * p_control * (1 - p_control) * ((_za + _zb) / TARGET_MDE) ** 2))
+n_per_arm = 8_000          # rounded up from n_required to a clean allocation
+print(f"Design: detecting {TARGET_MDE*100:.1f}pp at {POWER:.0%} power (alpha={ALPHA}) "
+      f"needs {n_required:,} per arm; running {n_per_arm:,}")
 
 conv_c = rng.random(n_per_arm) < p_control
 conv_t = rng.random(n_per_arm) < p_treat
@@ -39,6 +49,15 @@ df = pd.DataFrame({
     "revenue": np.concatenate([rev_c, rev_t]).round(2),
 })
 df.to_csv("data/experiment.csv", index=False)
+
+# ---------- Sample ratio mismatch ----------
+# First thing to check in any real experiment: did the split come out as designed?
+# If the randomiser or the logging is broken, nothing downstream is worth reading.
+n_c, n_t = len(conv_c), len(conv_t)
+srm_chi2 = (n_c - n_t) ** 2 / (n_c + n_t)
+srm_p = 1 - stats.chi2.cdf(srm_chi2, df=1)
+print(f"SRM check: {n_c:,} vs {n_t:,} (chi2 p = {srm_p:.3f})"
+      + ("  OK" if srm_p > 0.01 else "  WARNING: split is not 50/50, stop here"))
 
 # ---------- Conversion analysis ----------
 x_c, x_t = conv_c.sum(), conv_t.sum()
@@ -55,9 +74,20 @@ p_value = 2*(1 - stats.norm.cdf(abs(z)))
 se_unpool = np.sqrt(cr_c*(1-cr_c)/n_per_arm + cr_t*(1-cr_t)/n_per_arm)
 ci = (abs_lift - 1.96*se_unpool, abs_lift + 1.96*se_unpool)
 
-# ---------- Revenue per user (Welch t-test) ----------
+# ---------- Revenue per user: GUARDRAIL metric ----------
+# Conversion is the primary metric and the ship decision rests on it alone.
+# Revenue per user is a guardrail: it is here to catch the case where conversion
+# goes up because people buy cheaper things. Treating both as primary would mean
+# two tests at alpha=0.05 and an inflated false positive rate.
+#
+# Revenue is zero for everyone who did not convert, so the distribution is a spike
+# at zero plus a skewed tail. A t-test survives that at this n by the CLT, but a
+# bootstrap interval makes no distributional assumption, so use that instead.
 t_stat, t_p = stats.ttest_ind(rev_t, rev_c, equal_var=False)
 rpu_c, rpu_t = rev_c.mean(), rev_t.mean()
+_bs = np.array([rng.choice(rev_t, n_per_arm).mean() - rng.choice(rev_c, n_per_arm).mean()
+                for _ in range(5000)])
+rpu_ci = (float(np.percentile(_bs, 2.5)), float(np.percentile(_bs, 97.5)))
 
 # ---------- Power / MDE ----------
 from math import sqrt
